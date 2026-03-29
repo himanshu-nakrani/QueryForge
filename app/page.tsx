@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import DataSourceSelector from '@/components/data-source-selector';
+import GeminiSettings from '@/components/gemini-settings';
 import SchemaViewer from '@/components/schema-viewer';
 import ChatInterface from '@/components/chat-interface';
 import { useQueryForge } from '@/hooks/use-query-forge';
@@ -17,6 +18,10 @@ export default function Home() {
     setSelectedTable,
     queryHistory,
     loading,
+    geminiApiKey,
+    setGeminiApiKey,
+    geminiModel,
+    setGeminiModel,
     uploadFile,
     createTable,
     executeQuery,
@@ -53,7 +58,13 @@ export default function Home() {
           <TabsContent value="dashboard" className="space-y-6">
             <div className="grid gap-6 lg:grid-cols-3">
               {/* Data Source Selector */}
-              <div className="lg:col-span-1">
+              <div className="lg:col-span-1 space-y-6">
+                <GeminiSettings
+                  apiKey={geminiApiKey}
+                  model={geminiModel}
+                  onApiKeyChange={setGeminiApiKey}
+                  onModelChange={setGeminiModel}
+                />
                 <DataSourceSelector 
                   onUpload={uploadFile} 
                   onManualTableCreate={createTable}

@@ -1,10 +1,10 @@
-"""LLM integration for natural language to SQL conversion."""
-import json
+"""LLM integration for natural language to SQL conversion (Google Gemini)."""
 from typing import Optional
-from openai import OpenAI
-from config import OPENAI_API_KEY
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+from google import genai
+from google.genai import types
+
+from config import GEMINI_API_KEY, GEMINI_MODEL
 
 
 def generate_sql_from_nl(
@@ -12,17 +12,24 @@ def generate_sql_from_nl(
     table_name: str,
     columns: list[dict],
     sample_data: Optional[str] = None,
+    *,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> str:
-    """Convert natural language to SQL using OpenAI."""
-    
-    # Build schema description
+    """Convert natural language to SQL using Gemini."""
+
+    key = (api_key or "").strip() or GEMINI_API_KEY
+    model_name = (model or "").strip() or GEMINI_MODEL
+    if not key:
+        return "ERROR: No API key. Enter your Gemini API key in the app or set GEMINI_API_KEY on the server."
+
     schema_desc = f"Table '{table_name}' has columns:\n"
     for col in columns:
         schema_desc += f"- {col['name']} ({col['type']})\n"
-    
+
     if sample_data:
         schema_desc += f"\nSample data:\n{sample_data}"
-    
+
     prompt = f"""You are a SQL expert. Convert the following natural language query into a valid SQL SELECT statement.
 
 {schema_desc}
@@ -39,14 +46,19 @@ Requirements:
 SQL Query:"""
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=500,
+        client = genai.Client(api_key=key)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0,
+                max_output_tokens=500,
+            ),
         )
-        sql = response.choices[0].message.content.strip()
-        return sql
+        text = (response.text or "").strip()
+        if not text:
+            return "ERROR: Empty response from Gemini"
+        return text
     except Exception as e:
         return f"ERROR: {str(e)}"
 
@@ -54,15 +66,13 @@ SQL Query:"""
 def validate_sql(sql: str) -> tuple[bool, Optional[str]]:
     """Validate that SQL is safe (SELECT only)."""
     sql_upper = sql.strip().upper()
-    
-    # Check for dangerous keywords
+
     dangerous_keywords = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "EXEC", "EXECUTE"]
     for keyword in dangerous_keywords:
         if keyword in sql_upper:
             return False, f"Query contains dangerous keyword: {keyword}"
-    
-    # Must be SELECT
+
     if not sql_upper.startswith("SELECT"):
         return False, "Query must start with SELECT"
-    
+
     return True, None

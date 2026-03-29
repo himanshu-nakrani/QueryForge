@@ -1,4 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  GEMINI_DEFAULT_MODEL,
+  loadGeminiSettingsFromStorage,
+  persistGeminiApiKey,
+  persistGeminiModel,
+} from '@/lib/gemini-settings';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -10,11 +16,57 @@ interface QueryHistoryItem {
   error?: string;
 }
 
+function getErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+
+  const obj = payload as Record<string, unknown>;
+
+  if (typeof obj.detail === 'string') return obj.detail;
+  if (typeof obj.message === 'string') return obj.message;
+
+  const errorObj = obj.error;
+  if (errorObj && typeof errorObj === 'object') {
+    const nested = errorObj as Record<string, unknown>;
+    if (typeof nested.message === 'string') return nested.message;
+    if (typeof nested.code === 'string') return nested.code;
+  }
+
+  if (Array.isArray(obj.detail)) {
+    const first = obj.detail[0];
+    if (first && typeof first === 'object') {
+      const detailObj = first as Record<string, unknown>;
+      if (typeof detailObj.msg === 'string') return detailObj.msg;
+      if (typeof detailObj.message === 'string') return detailObj.message;
+    }
+  }
+
+  return fallback;
+}
+
 export function useQueryForge() {
   const [tables, setTables] = useState<string[]>([]);
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [queryHistory, setQueryHistory] = useState<QueryHistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [geminiApiKey, setGeminiApiKeyState] = useState('');
+  const [geminiModel, setGeminiModelState] = useState(GEMINI_DEFAULT_MODEL);
+
+  useEffect(() => {
+    const { apiKey, model } = loadGeminiSettingsFromStorage();
+    setGeminiApiKeyState(apiKey);
+    setGeminiModelState(model);
+  }, []);
+
+  const setGeminiApiKey = useCallback((value: string) => {
+    setGeminiApiKeyState(value);
+    persistGeminiApiKey(value);
+  }, []);
+
+  const setGeminiModel = useCallback((value: string) => {
+    const next = value.trim() || GEMINI_DEFAULT_MODEL;
+    setGeminiModelState(next);
+    persistGeminiModel(value);
+  }, []);
 
   // Load tables on mount
   useEffect(() => {
@@ -48,7 +100,7 @@ export function useQueryForge() {
 
       if (!res.ok) {
         const error = await res.json();
-        throw new Error(error.detail || 'Upload failed');
+        throw new Error(getErrorMessage(error, 'Upload failed'));
       }
 
       const data = await res.json();
@@ -77,7 +129,7 @@ export function useQueryForge() {
 
       if (!res.ok) {
         const error = await res.json();
-        throw new Error(error.detail || 'Table creation failed');
+        throw new Error(getErrorMessage(error, 'Table creation failed'));
       }
 
       const data = await res.json();
@@ -99,19 +151,25 @@ export function useQueryForge() {
     async (naturalLanguage: string, tableName: string, execute: boolean = true) => {
       setLoading(true);
       try {
+        const body: Record<string, unknown> = {
+          query: naturalLanguage,
+          table_name: tableName,
+          execute,
+        };
+        const key = geminiApiKey.trim();
+        const model = geminiModel.trim();
+        if (key) body.gemini_api_key = key;
+        if (model) body.gemini_model = model;
+
         const res = await fetch(`${API_BASE}/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: naturalLanguage,
-            table_name: tableName,
-            execute,
-          }),
+          body: JSON.stringify(body),
         });
 
         if (!res.ok) {
           const error = await res.json();
-          throw new Error(error.detail || 'Query failed');
+          throw new Error(getErrorMessage(error, 'Query failed'));
         }
 
         const data = await res.json();
@@ -146,7 +204,7 @@ export function useQueryForge() {
         setLoading(false);
       }
     },
-    []
+    [geminiApiKey, geminiModel]
   );
 
   return {
@@ -155,6 +213,10 @@ export function useQueryForge() {
     setSelectedTable,
     queryHistory,
     loading,
+    geminiApiKey,
+    setGeminiApiKey,
+    geminiModel,
+    setGeminiModel,
     uploadFile,
     createTable,
     executeQuery,

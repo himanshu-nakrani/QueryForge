@@ -9,7 +9,7 @@ NC='\033[0m' # No Color
 if [ ! -f .env.local ]; then
   echo "Creating .env.local from .env.example..."
   cp .env.example .env.local
-  echo "Please edit .env.local and add your OPENAI_API_KEY"
+  echo "Please edit .env.local and add your GEMINI_API_KEY"
 fi
 
 # Start backend in background

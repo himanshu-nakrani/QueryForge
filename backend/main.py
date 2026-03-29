@@ -1,6 +1,6 @@
 """FastAPI application for QueryForge."""
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pathlib import Path
@@ -50,7 +50,7 @@ from error_handlers import (
 # Pydantic models for request validation
 class ColumnDefinition(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    type: str = Field(..., regex=r'^(TEXT|INTEGER|REAL|BOOLEAN|DATE)$')
+    type: str = Field(..., pattern=r'^(TEXT|INTEGER|REAL|BOOLEAN|DATE)$')
 
     @validator('name')
     def name_must_be_valid(cls, v):
@@ -83,6 +83,16 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=5000)
     table_name: str = Field(..., min_length=1, max_length=255)
     execute: bool = False
+    gemini_api_key: Optional[str] = Field(
+        None,
+        max_length=512,
+        description="Optional. Uses server GEMINI_API_KEY when omitted.",
+    )
+    gemini_model: Optional[str] = Field(
+        None,
+        max_length=128,
+        description="Optional. Uses server GEMINI_MODEL when omitted.",
+    )
 
 
 @asynccontextmanager
@@ -134,7 +144,7 @@ app.add_middleware(
 @app.get("/")
 @app.get("/health")
 @limiter.limit("100/minute")
-async def health_check(request) -> dict[str, str]:
+async def health_check(request: Request) -> dict[str, str]:
     """Health check endpoint."""
     return {
         "status": "healthy",
@@ -145,7 +155,7 @@ async def health_check(request) -> dict[str, str]:
 
 @app.post("/upload")
 @limiter.limit("10/minute")
-async def upload_file(request, file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_file(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
     """Upload and import CSV file."""
     if not file.filename or not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="File must be CSV")
@@ -180,13 +190,13 @@ async def upload_file(request, file: UploadFile = File(...)) -> dict[str, Any]:
 
 @app.post("/create-table")
 @limiter.limit("20/minute")
-async def create_table(request_obj, request: CreateTableRequest) -> dict[str, Any]:
+async def create_table(request: Request, payload: CreateTableRequest) -> dict[str, Any]:
     """Create a new table with specified schema."""
     try:
-        logger.info(f"Creating table: {request.name} with {len(request.columns)} columns")
+        logger.info(f"Creating table: {payload.name} with {len(payload.columns)} columns")
         
         from database import create_table as db_create_table
-        result = db_create_table(request.name, request.columns)
+        result = db_create_table(payload.name, payload.columns)
         
         if "error" in result:
             logger.error(f"Table creation error: {result['error']}")
@@ -196,21 +206,21 @@ async def create_table(request_obj, request: CreateTableRequest) -> dict[str, An
         db = SessionLocal()
         try:
             uploaded_file = UploadedFile(
-                table_name=request.name,
-                original_name=f"{request.name}_manual",
+                table_name=payload.name,
+                original_name=f"{payload.name}_manual",
                 row_count=0,
-                columns=json.dumps([{"name": col.name, "type": col.type} for col in request.columns]),
+                columns=json.dumps([{"name": col.name, "type": col.type} for col in payload.columns]),
             )
             db.add(uploaded_file)
             db.commit()
         finally:
             db.close()
         
-        logger.info(f"Successfully created table {request.name}")
+        logger.info(f"Successfully created table {payload.name}")
         return {
             "success": True,
-            "table_name": request.name,
-            "columns": [{"name": col.name, "type": col.type} for col in request.columns],
+            "table_name": payload.name,
+            "columns": [{"name": col.name, "type": col.type} for col in payload.columns],
         }
     except HTTPException:
         raise
@@ -257,11 +267,11 @@ async def get_schema(table_name: str):
 
 @app.post("/query")
 @limiter.limit("30/minute")
-async def natural_language_query(request_obj, request: QueryRequest) -> dict[str, Any]:
+async def natural_language_query(request: Request, payload: QueryRequest) -> dict[str, Any]:
     """Convert natural language to SQL and optionally execute."""
-    nl_query = request.query.strip()
-    table_name = request.table_name.strip()
-    execute = request.execute
+    nl_query = payload.query.strip()
+    table_name = payload.table_name.strip()
+    execute = payload.execute
     
     logger.info(f"Processing query: {nl_query[:50]}... for table: {table_name}")
     
@@ -274,12 +284,14 @@ async def natural_language_query(request_obj, request: QueryRequest) -> dict[str
         # Get sample data for context
         sample_data = get_sample_data(table_name)
         
-        # Generate SQL
+        # Generate SQL (optional per-request Gemini credentials from client)
         sql = generate_sql_from_nl(
             nl_query,
             table_name,
             schema["columns"],
             sample_data,
+            api_key=payload.gemini_api_key,
+            model=payload.gemini_model,
         )
         
         if sql.startswith("ERROR:"):
@@ -364,14 +376,14 @@ async def get_history(table_name: Optional[str] = None, limit: int = 50):
 
 @app.get("/health/full")
 @limiter.limit("100/minute")
-async def full_health_check(request) -> dict:
+async def full_health_check(request: Request) -> dict:
     """Perform full health check."""
     return HealthChecker.full_health_check()
 
 
 @app.get("/health/ready")
 @limiter.limit("100/minute")
-async def readiness_check(request) -> dict:
+async def readiness_check(request: Request) -> dict:
     """Readiness check - is the service ready to accept traffic."""
     checks = HealthChecker.full_health_check()
     if checks["overall_status"] == "healthy":
@@ -381,7 +393,7 @@ async def readiness_check(request) -> dict:
 
 @app.get("/stats")
 @limiter.limit("50/minute")
-async def get_stats(request) -> dict:
+async def get_stats(request: Request) -> dict:
     """Get database statistics."""
     return {
         "database": get_database_stats(),
