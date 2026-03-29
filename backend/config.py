@@ -1,0 +1,14 @@
+"""Database and application configuration."""
+import os
+from pathlib import Path
+
+# Database
+DB_PATH = Path(__file__).parent.parent / "data" / "queryforge.db"
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+DATABASE_URL = f"sqlite:///{DB_PATH}"
+
+# API Keys
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# CORS
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
