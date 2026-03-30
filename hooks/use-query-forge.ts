@@ -9,11 +9,13 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface QueryHistoryItem {
+  id?: number;
   naturalLanguage: string;
   generatedSql: string;
   tableName: string;
   executed: boolean;
   error?: string;
+  createdAt?: string;
 }
 
 function getErrorMessage(payload: unknown, fallback: string): string {
@@ -29,6 +31,13 @@ function getErrorMessage(payload: unknown, fallback: string): string {
     const nested = errorObj as Record<string, unknown>;
     if (typeof nested.message === 'string') return nested.message;
     if (typeof nested.code === 'string') return nested.code;
+    if (Array.isArray(nested.details) && nested.details.length > 0) {
+      const first = nested.details[0];
+      if (first && typeof first === 'object') {
+        const detail = first as Record<string, unknown>;
+        if (typeof detail.message === 'string') return detail.message;
+      }
+    }
   }
 
   if (Array.isArray(obj.detail)) {
@@ -86,6 +95,28 @@ export function useQueryForge() {
       console.error('Error fetching tables:', error);
     }
   }, [selectedTable]);
+
+  const fetchHistory = useCallback(async (tableName?: string) => {
+    try {
+      const params = new URLSearchParams({ limit: '100' });
+      if (tableName) params.set('table_name', tableName);
+      const res = await fetch(`${API_BASE}/history?${params.toString()}`);
+      if (!res.ok) throw new Error('Failed to fetch history');
+      const data = await res.json();
+      const mapped = (data.history || []).map((item: Record<string, unknown>) => ({
+        id: typeof item.id === 'number' ? item.id : undefined,
+        naturalLanguage: String(item.natural_language || ''),
+        generatedSql: String(item.generated_sql || ''),
+        tableName: String(item.table_name || ''),
+        executed: Boolean(item.executed),
+        error: typeof item.error === 'string' ? item.error : undefined,
+        createdAt: typeof item.created_at === 'string' ? item.created_at : undefined,
+      }));
+      setQueryHistory(mapped);
+    } catch (error) {
+      console.error('Error fetching history:', error);
+    }
+  }, []);
 
   const uploadFile = useCallback(async (file: File) => {
     setLoading(true);
@@ -148,13 +179,15 @@ export function useQueryForge() {
   }, [fetchTables]);
 
   const executeQuery = useCallback(
-    async (naturalLanguage: string, tableName: string, execute: boolean = true) => {
+    async (naturalLanguage: string, tableName: string, execute: boolean = true, offset: number = 0) => {
       setLoading(true);
       try {
         const body: Record<string, unknown> = {
           query: naturalLanguage,
           table_name: tableName,
           execute,
+          limit: 100,
+          offset,
         };
         const key = geminiApiKey.trim();
         const model = geminiModel.trim();
@@ -174,31 +207,35 @@ export function useQueryForge() {
 
         const data = await res.json();
         
-        // Add to history
-        setQueryHistory((prev) => [
-          {
-            naturalLanguage,
-            generatedSql: data.sql,
-            tableName,
-            executed: execute && data.success,
-            error: !data.success ? data.error : undefined,
-          },
-          ...prev,
-        ]);
+        if (offset === 0) {
+          // Add latest query to local history view; canonical history comes from /history.
+          setQueryHistory((prev) => [
+            {
+              naturalLanguage,
+              generatedSql: data.sql,
+              tableName,
+              executed: execute && data.success,
+              error: !data.success ? data.error : undefined,
+            },
+            ...prev,
+          ]);
+        }
 
         return data;
       } catch (error) {
         console.error('[v0] Query error:', error);
-        setQueryHistory((prev) => [
-          {
-            naturalLanguage,
-            generatedSql: '',
-            tableName,
-            executed: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          },
-          ...prev,
-        ]);
+        if (offset === 0) {
+          setQueryHistory((prev) => [
+            {
+              naturalLanguage,
+              generatedSql: '',
+              tableName,
+              executed: false,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            },
+            ...prev,
+          ]);
+        }
         throw error;
       } finally {
         setLoading(false);
@@ -206,6 +243,10 @@ export function useQueryForge() {
     },
     [geminiApiKey, geminiModel]
   );
+
+  useEffect(() => {
+    fetchHistory(selectedTable || undefined);
+  }, [selectedTable, fetchHistory]);
 
   return {
     tables,
@@ -220,5 +261,6 @@ export function useQueryForge() {
     uploadFile,
     createTable,
     executeQuery,
+    refreshHistory: () => fetchHistory(selectedTable || undefined),
   };
 }

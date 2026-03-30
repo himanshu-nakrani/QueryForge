@@ -1,12 +1,12 @@
 # QueryForge - Natural Language to SQL Query Builder
 
-QueryForge is a full-stack application that allows you to upload CSV files and query them using natural language. The app converts your questions to SQL using OpenAI's API and safely executes them.
+QueryForge is a full-stack application that allows you to upload CSV files and query them using natural language. The app converts your questions to SQL using Google Gemini and safely executes them.
 
 ## Features
 
 - **File Upload**: Drag-and-drop CSV file upload with automatic schema detection
 - **Natural Language Queries**: Ask questions about your data in plain English
-- **LLM-Powered SQL Generation**: Uses OpenAI GPT-3.5-turbo to convert natural language to SQL
+- **LLM-Powered SQL Generation**: Uses Google Gemini to convert natural language to SQL
 - **Safety Layer**: Only allows SELECT queries, prevents SQL injection
 - **Query History**: Keep track of all your queries and results
 - **Beautiful UI**: Modern, dark-mode ready interface with shadcn/ui
@@ -14,7 +14,7 @@ QueryForge is a full-stack application that allows you to upload CSV files and q
 ## Tech Stack
 
 - **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui
-- **Backend**: FastAPI, SQLAlchemy, SQLite, Pandas, OpenAI API
+- **Backend**: FastAPI, SQLAlchemy, SQLite, Pandas, Google Gemini API
 - **Database**: SQLite for storing uploaded data and query history
 
 ## Setup Instructions
@@ -37,9 +37,11 @@ Create a `.env.local` file in the root directory:
 cp .env.example .env.local
 ```
 
-Add your OpenAI API key:
+Add your Gemini API key:
 ```
-OPENAI_API_KEY=sk_your_key_here
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-2.0-flash
+ALLOW_CLIENT_LLM_CONFIG=false
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
@@ -83,7 +85,7 @@ The frontend will be available at `http://localhost:3000`
 - `POST /upload` - Upload a CSV file
 - `GET /tables` - List all available tables
 - `GET /schema/{table_name}` - Get schema information for a table
-- `POST /query` - Generate and execute a query from natural language
+- `POST /query` - Generate and execute a query from natural language (supports `limit` and `offset`)
 - `GET /history` - Get query history
 - `GET /` - Health check
 
@@ -122,7 +124,7 @@ QueryForge/
 ### CORS Errors
 Make sure the backend is running on `http://localhost:8000` and frontend on `http://localhost:3000`. Update `NEXT_PUBLIC_API_URL` if using different ports.
 
-### OpenAI API Errors
+### Gemini API Errors
 Verify your API key is correct and has sufficient credits. Check `http://localhost:8000/docs` for API responses.
 
 ### Database Errors

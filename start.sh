@@ -15,7 +15,13 @@ fi
 # Start backend in background
 echo -e "${BLUE}Starting FastAPI backend...${NC}"
 cd backend
-uv run python -m uvicorn main:app --reload --port 8000 &
+if [ -x "../.venv/bin/python" ]; then
+  ../.venv/bin/python -m uvicorn main:app --reload --port 8000 &
+elif command -v uv >/dev/null 2>&1; then
+  uv run python -m uvicorn main:app --reload --port 8000 &
+else
+  python3 -m uvicorn main:app --reload --port 8000 &
+fi
 BACKEND_PID=$!
 cd ..
 

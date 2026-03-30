@@ -132,9 +132,16 @@ export default function Home() {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <p className="font-semibold text-foreground">{item.naturalLanguage}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {item.tableName}
+                              {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString()}` : ''}
+                            </p>
                             <code className="block mt-2 rounded bg-muted p-2 font-mono text-xs text-muted-foreground overflow-auto">
                               {item.generatedSql}
                             </code>
+                            {item.error && (
+                              <p className="mt-2 text-xs text-destructive">{item.error}</p>
+                            )}
                           </div>
                           {item.executed && (
                             <span className="ml-2 inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">

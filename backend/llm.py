@@ -3,6 +3,8 @@ from typing import Optional
 
 from google import genai
 from google.genai import types
+from sqlglot import exp, parse_one
+from sqlglot.errors import ParseError
 
 from config import GEMINI_API_KEY, GEMINI_MODEL
 
@@ -63,16 +65,36 @@ SQL Query:"""
         return f"ERROR: {str(e)}"
 
 
-def validate_sql(sql: str) -> tuple[bool, Optional[str]]:
-    """Validate that SQL is safe (SELECT only)."""
-    sql_upper = sql.strip().upper()
+def validate_sql(sql: str, allowed_tables: Optional[set[str]] = None) -> tuple[bool, Optional[str]]:
+    """Validate that SQL is read-only and restricted to known tables."""
+    raw = sql.strip().rstrip(";")
+    if not raw:
+        return False, "Query is empty"
 
-    dangerous_keywords = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "EXEC", "EXECUTE"]
-    for keyword in dangerous_keywords:
-        if keyword in sql_upper:
-            return False, f"Query contains dangerous keyword: {keyword}"
+    try:
+        parsed = parse_one(raw, read="sqlite")
+    except ParseError:
+        return False, "Generated SQL is invalid"
 
-    if not sql_upper.startswith("SELECT"):
-        return False, "Query must start with SELECT"
+    if not isinstance(parsed, exp.Select):
+        return False, "Query must be a single SELECT statement"
+
+    disallowed_nodes = (
+        exp.Insert,
+        exp.Update,
+        exp.Delete,
+        exp.Drop,
+        exp.Create,
+        exp.Alter,
+        exp.Command,
+    )
+    if any(parsed.find(node_type) for node_type in disallowed_nodes):
+        return False, "Query contains disallowed SQL operations"
+
+    if allowed_tables:
+        referenced_tables = {t.name.lower() for t in parsed.find_all(exp.Table) if t.name}
+        unknown_tables = sorted(referenced_tables - {name.lower() for name in allowed_tables})
+        if unknown_tables:
+            return False, f"Query references unknown tables: {', '.join(unknown_tables)}"
 
     return True, None

@@ -1,16 +1,25 @@
 """Database utilities for CSV import and query execution."""
 import json
-import sqlite3
+import re
 from pathlib import Path
 from typing import Any, List
 import pandas as pd
-from sqlalchemy import inspect, text, create_engine, MetaData, Table, Column, String, Integer, Float, Boolean, Date
+from sqlalchemy import inspect, text, MetaData, Table, Column, String, Integer, Float, Boolean, Date
 from models import engine, SessionLocal, UploadedFile, QueryHistory
 from config import DB_PATH
 
 # Data directory for uploaded CSV files
 DATA_DIR = Path(__file__).parent.parent / "data" / "uploads"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+MAX_QUERY_ROWS = 200
+MAX_HISTORY_LIMIT = 200
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def is_valid_identifier(value: str) -> bool:
+    """Return True when identifier is safe for SQL object names."""
+    return bool(_IDENTIFIER_RE.match(value))
 
 
 def create_table(table_name: str, columns: List[dict]) -> dict[str, Any]:
@@ -94,11 +103,19 @@ def import_csv(filepath: str, table_name: str) -> dict[str, Any]:
         return {"error": str(e)}
 
 
-def execute_query(sql: str, table_name: str) -> dict[str, Any]:
+def execute_query(sql: str, table_name: str, limit: int = MAX_QUERY_ROWS, offset: int = 0) -> dict[str, Any]:
     """Execute SQL query and return results."""
     try:
+        effective_limit = max(1, min(limit, MAX_QUERY_ROWS))
+        effective_offset = max(0, offset)
+        paginated_sql = f"""
+SELECT * FROM (
+{sql.strip().rstrip(';')}
+) AS queryforge_subquery
+LIMIT {effective_limit} OFFSET {effective_offset}
+"""
         with engine.connect() as conn:
-            result = conn.execute(text(sql))
+            result = conn.execute(text(paginated_sql))
             rows = result.fetchall()
             columns = result.keys()
             
@@ -110,6 +127,9 @@ def execute_query(sql: str, table_name: str) -> dict[str, Any]:
                 "data": data,
                 "columns": list(columns),
                 "row_count": len(data),
+                "limit": effective_limit,
+                "offset": effective_offset,
+                "has_more": len(data) == effective_limit,
             }
     except Exception as e:
         return {"error": str(e)}
@@ -144,7 +164,10 @@ def get_table_schema(table_name: str) -> dict[str, Any]:
 def get_sample_data(table_name: str, limit: int = 5) -> str:
     """Get sample data from a table as formatted string."""
     try:
-        df = pd.read_sql(f"SELECT * FROM {table_name} LIMIT {limit}", engine)
+        if not is_valid_identifier(table_name):
+            return ""
+        capped_limit = max(1, min(limit, 20))
+        df = pd.read_sql(text(f"SELECT * FROM {table_name} LIMIT :limit"), engine, params={"limit": capped_limit})
         return df.to_string(index=False)
     except Exception:
         return ""

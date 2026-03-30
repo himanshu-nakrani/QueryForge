@@ -5,7 +5,7 @@
 ### Prerequisites
 - Node.js 18+ and pnpm
 - Python 3.10+
-- OpenAI API key (get one at https://platform.openai.com/api-keys)
+- Gemini API key (get one at https://aistudio.google.com/apikey)
 
 ### Step 1: Clone and Install Dependencies
 
@@ -25,8 +25,10 @@ uv add -r pyproject.toml
 # Copy example env file
 cp .env.example .env.local
 
-# Edit .env.local and add your OpenAI API key
-# OPENAI_API_KEY=sk_test_your_api_key_here
+# Edit .env.local and add your Gemini API key
+# GEMINI_API_KEY=your_key_here
+# GEMINI_MODEL=gemini-2.0-flash
+# ALLOW_CLIENT_LLM_CONFIG=false
 ```
 
 ### Step 3: Run the Application
@@ -135,7 +137,7 @@ rm data/queryforge.db
 # Restart the backend to recreate tables
 ```
 
-### OpenAI API errors
+### Gemini API errors
 - Check your API key is correct in `.env.local`
 - Verify account has available credits
 - Check rate limits aren't exceeded

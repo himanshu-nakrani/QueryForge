@@ -3,7 +3,7 @@ import logging
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,28 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             }
         }
     )
+
+
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Normalize HTTPException payloads to error contract."""
+    detail = exc.detail
+    code = "HTTP_ERROR"
+    message = "Request failed"
+    details = None
+
+    if isinstance(detail, dict):
+        code = str(detail.get("code", code))
+        message = str(detail.get("message", message))
+        details = detail.get("details")
+    elif isinstance(detail, str):
+        message = detail
+    elif detail is not None:
+        details = detail
+
+    payload = {"error": {"code": code, "message": message}}
+    if details is not None:
+        payload["error"]["details"] = details
+    return JSONResponse(status_code=exc.status_code, content=payload)
 
 
 async def generic_exception_handler(request: Request, exc: Exception):

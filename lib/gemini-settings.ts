@@ -1,6 +1,5 @@
 export const GEMINI_DEFAULT_MODEL = 'gemini-2.0-flash';
 
-const STORAGE_KEY_API = 'queryforge.geminiApiKey';
 const STORAGE_KEY_MODEL = 'queryforge.geminiModel';
 
 export function loadGeminiSettingsFromStorage(): { apiKey: string; model: string } {
@@ -8,15 +7,15 @@ export function loadGeminiSettingsFromStorage(): { apiKey: string; model: string
     return { apiKey: '', model: GEMINI_DEFAULT_MODEL };
   }
   return {
-    apiKey: localStorage.getItem(STORAGE_KEY_API) ?? '',
+    // API key intentionally not persisted to reduce secret-at-rest risk.
+    apiKey: '',
     model: localStorage.getItem(STORAGE_KEY_MODEL) ?? GEMINI_DEFAULT_MODEL,
   };
 }
 
 export function persistGeminiApiKey(value: string) {
-  if (typeof window === 'undefined') return;
-  if (value.trim()) localStorage.setItem(STORAGE_KEY_API, value);
-  else localStorage.removeItem(STORAGE_KEY_API);
+  // Intentionally a no-op to avoid persisting sensitive keys.
+  void value;
 }
 
 export function persistGeminiModel(value: string) {

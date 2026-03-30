@@ -150,7 +150,9 @@ Content-Type: application/json
 {
   "query": "Show me all active users",
   "table_name": "users",
-  "execute": true
+  "execute": true,
+  "limit": 100,
+  "offset": 0
 }
 ```
 
@@ -159,7 +161,9 @@ Content-Type: application/json
 {
   "query": "string (required)",      // Natural language question
   "table_name": "string (required)", // Table to query
-  "execute": "boolean (optional)"    // Whether to execute (default: true)
+  "execute": "boolean (optional)",   // Whether to execute (default: false)
+  "limit": "integer (optional)",     // Page size (max: 200)
+  "offset": "integer (optional)"     // Page offset
 }
 ```
 
@@ -174,7 +178,10 @@ Content-Type: application/json
       {"id": 1, "name": "John", "email": "john@example.com", "active": 1},
       {"id": 2, "name": "Jane", "email": "jane@example.com", "active": 1}
     ],
-    "row_count": 2
+    "row_count": 2,
+    "limit": 100,
+    "offset": 0,
+    "has_more": false
   }
 }
 ```
@@ -197,7 +204,7 @@ Content-Type: application/json
 ```
 
 **Error Types:**
-- `"LLM error: ..."` - OpenAI API error
+- `"LLM error: ..."` - Gemini API error
 - `"The query cannot be answered..."` - LLM couldn't generate valid query
 - `"Query contains dangerous keyword: ..."` - SQL injection detected
 - `"Execution error: ..."` - Database execution failed
@@ -244,7 +251,8 @@ GET /history?table_name=users&limit=50
       "error": null,
       "created_at": "2024-03-29T10:25:00"
     }
-  ]
+  ],
+  "limit": 50
 }
 ```
 
@@ -270,7 +278,11 @@ All errors follow this format:
 
 ```json
 {
-  "detail": "Error message describing what went wrong"
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Error message describing what went wrong",
+    "details": {}
+  }
 }
 ```
 
@@ -282,7 +294,7 @@ Common errors:
 | "Missing query or table_name" | 400 | Incomplete request |
 | "Invalid table name" | 400 | SQL injection attempt |
 | "Table not found" | 404 | Table doesn't exist |
-| "LLM error: ..." | 200 | OpenAI API failure |
+| "LLM error: ..." | 200 | Gemini API failure |
 | "Query contains dangerous keyword: DELETE" | 200 | Safety validation failed |
 
 ---
@@ -305,7 +317,7 @@ async def list_tables(credentials: HTTPAuthCredentials = Depends(security)):
 
 ## Rate Limiting
 
-No built-in rate limiting. For production, add:
+Built-in rate limiting is enabled with SlowAPI decorators on key endpoints.
 
 ```python
 from slowapi import Limiter

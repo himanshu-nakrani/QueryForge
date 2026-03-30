@@ -3,16 +3,22 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
 
 interface QueryResultsProps {
   results: {
     columns: string[];
     data: Record<string, any>[];
     row_count: number;
+    limit?: number;
+    offset?: number;
+    has_more?: boolean;
   };
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
-export default function QueryResults({ results }: QueryResultsProps) {
+export default function QueryResults({ results, onLoadMore, loadingMore = false }: QueryResultsProps) {
   if (!results.data || results.data.length === 0) {
     return (
       <Card>
@@ -27,7 +33,12 @@ export default function QueryResults({ results }: QueryResultsProps) {
     <Card>
       <CardHeader>
         <CardTitle>Results</CardTitle>
-        <CardDescription>{results.row_count} rows returned</CardDescription>
+        <CardDescription>
+          {results.row_count} rows returned
+          {typeof results.offset === 'number' && typeof results.limit === 'number'
+            ? ` (offset ${results.offset}, page size ${results.limit})`
+            : ''}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <ScrollArea className="w-full">
@@ -56,6 +67,13 @@ export default function QueryResults({ results }: QueryResultsProps) {
             </TableBody>
           </Table>
         </ScrollArea>
+        {results.has_more && onLoadMore && (
+          <div className="mt-4 flex justify-end">
+            <Button onClick={onLoadMore} disabled={loadingMore} variant="outline" size="sm">
+              {loadingMore ? 'Loading...' : 'Load more'}
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

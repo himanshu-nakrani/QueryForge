@@ -11,7 +11,7 @@ import QueryResults from './query-results';
 
 interface ChatInterfaceProps {
   tableName: string;
-  onQuery: (query: string, tableName: string) => Promise<any>;
+  onQuery: (query: string, tableName: string, execute?: boolean, offset?: number) => Promise<any>;
   loading: boolean;
 }
 
@@ -20,6 +20,8 @@ interface Message {
   content: string;
   sql?: string;
   results?: any;
+  query?: string;
+  tableName?: string;
 }
 
 export default function ChatInterface({ tableName, onQuery, loading }: ChatInterfaceProps) {
@@ -28,6 +30,7 @@ export default function ChatInterface({ tableName, onQuery, loading }: ChatInter
   const [localLoading, setLocalLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [loadingMoreForMessage, setLoadingMoreForMessage] = useState<number | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -50,7 +53,7 @@ export default function ChatInterface({ tableName, onQuery, loading }: ChatInter
 
     try {
       console.log('[v0] Executing query:', query);
-      const result = await onQuery(query, tableName);
+      const result = await onQuery(query, tableName, true, 0);
       
       if (result.success) {
         setMessages((prev) => [
@@ -60,6 +63,8 @@ export default function ChatInterface({ tableName, onQuery, loading }: ChatInter
             content: `Generated SQL and executed successfully. Found ${result.results?.row_count || 0} rows.`,
             sql: result.sql,
             results: result.results,
+            query,
+            tableName,
           },
         ]);
       } else {
@@ -84,6 +89,40 @@ export default function ChatInterface({ tableName, onQuery, loading }: ChatInter
       ]);
     } finally {
       setLocalLoading(false);
+    }
+  };
+
+  const handleLoadMore = async (messageIndex: number) => {
+    const message = messages[messageIndex];
+    if (!message?.query || !message?.tableName || !message.results?.has_more) return;
+
+    setLoadingMoreForMessage(messageIndex);
+    try {
+      const nextOffset = Number(message.results.offset || 0) + Number(message.results.limit || 100);
+      const result = await onQuery(message.query, message.tableName, true, nextOffset);
+      if (!result.success || !result.results) return;
+
+      setMessages((prev) =>
+        prev.map((msg, idx) => {
+          if (idx !== messageIndex || !msg.results) return msg;
+          const existingData = Array.isArray(msg.results.data) ? msg.results.data : [];
+          const incomingData = Array.isArray(result.results.data) ? result.results.data : [];
+          return {
+            ...msg,
+            content: `Generated SQL and executed successfully. Found ${existingData.length + incomingData.length} rows.`,
+            results: {
+              ...result.results,
+              data: [...existingData, ...incomingData],
+              row_count: existingData.length + incomingData.length,
+            },
+          };
+        })
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setMessages((prev) => [...prev, { type: 'error', content: errorMessage }]);
+    } finally {
+      setLoadingMoreForMessage(null);
     }
   };
 
@@ -125,7 +164,11 @@ export default function ChatInterface({ tableName, onQuery, loading }: ChatInter
                   )}
                   {msg.results && (
                     <div className="ml-0">
-                      <QueryResults results={msg.results} />
+                      <QueryResults
+                        results={msg.results}
+                        onLoadMore={msg.results?.has_more ? () => handleLoadMore(idx) : undefined}
+                        loadingMore={loadingMoreForMessage === idx}
+                      />
                     </div>
                   )}
                 </div>

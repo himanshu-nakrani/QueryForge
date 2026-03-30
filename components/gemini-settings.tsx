@@ -29,7 +29,7 @@ export default function GeminiSettings({
           <div>
             <CardTitle className="text-base">Gemini</CardTitle>
             <CardDescription className="text-xs">
-              API key and model for natural-language to SQL. Stored only in this browser.
+              API key and model for natural-language to SQL. API key is not stored and resets on refresh.
             </CardDescription>
           </div>
         </div>

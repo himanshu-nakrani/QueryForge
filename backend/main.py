@@ -1,6 +1,7 @@
 """FastAPI application for QueryForge."""
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pathlib import Path
@@ -12,7 +13,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from config import FRONTEND_URL
+from config import FRONTEND_URL, ALLOW_CLIENT_LLM_CONFIG
 
 # Setup logging
 logging.basicConfig(
@@ -35,6 +36,9 @@ from database import (
     get_sample_data,
     save_query_history,
     DATA_DIR,
+    MAX_QUERY_ROWS,
+    MAX_HISTORY_LIMIT,
+    is_valid_identifier,
 )
 from llm import generate_sql_from_nl, validate_sql
 from models import SessionLocal, UploadedFile, QueryHistory
@@ -42,6 +46,7 @@ from health import HealthChecker, get_database_stats
 from error_handlers import (
     queryforge_exception_handler,
     validation_exception_handler,
+    http_exception_handler,
     generic_exception_handler,
     QueryForgeException,
 )
@@ -83,15 +88,17 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=5000)
     table_name: str = Field(..., min_length=1, max_length=255)
     execute: bool = False
+    limit: int = Field(100, ge=1, le=MAX_QUERY_ROWS)
+    offset: int = Field(0, ge=0, le=100000)
     gemini_api_key: Optional[str] = Field(
         None,
         max_length=512,
-        description="Optional. Uses server GEMINI_API_KEY when omitted.",
+        description="Optional. Requires ALLOW_CLIENT_LLM_CONFIG=true; otherwise ignored.",
     )
     gemini_model: Optional[str] = Field(
         None,
         max_length=128,
-        description="Optional. Uses server GEMINI_MODEL when omitted.",
+        description="Optional. Requires ALLOW_CLIENT_LLM_CONFIG=true; otherwise ignored.",
     )
 
 
@@ -114,9 +121,11 @@ app.state.limiter = limiter
 # Register exception handlers
 app.add_exception_handler(RateLimitExceeded, lambda request, exc: JSONResponse(
     status_code=429,
-    content={"detail": "Rate limit exceeded. Please try again later."}
+    content={"error": {"code": "RATE_LIMITED", "message": "Rate limit exceeded. Please try again later."}}
 ))
 app.add_exception_handler(QueryForgeException, queryforge_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
 # Security headers middleware
@@ -254,13 +263,13 @@ async def list_tables():
 @app.get("/schema/{table_name}")
 async def get_schema(table_name: str):
     """Get schema for a specific table."""
-    if not table_name.replace("_", "").isalnum():
-        raise HTTPException(status_code=400, detail="Invalid table name")
+    if not is_valid_identifier(table_name):
+        raise HTTPException(status_code=400, detail={"code": "INVALID_TABLE", "message": "Invalid table name"})
     
     schema = get_table_schema(table_name)
     
     if "error" in schema:
-        raise HTTPException(status_code=404, detail=schema["error"])
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": schema["error"]})
     
     return schema
 
@@ -279,7 +288,7 @@ async def natural_language_query(request: Request, payload: QueryRequest) -> dic
         # Get table schema
         schema = get_table_schema(table_name)
         if "error" in schema:
-            raise HTTPException(status_code=404, detail="Table not found")
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Table not found"})
         
         # Get sample data for context
         sample_data = get_sample_data(table_name)
@@ -290,8 +299,8 @@ async def natural_language_query(request: Request, payload: QueryRequest) -> dic
             table_name,
             schema["columns"],
             sample_data,
-            api_key=payload.gemini_api_key,
-            model=payload.gemini_model,
+            api_key=payload.gemini_api_key if ALLOW_CLIENT_LLM_CONFIG else None,
+            model=payload.gemini_model if ALLOW_CLIENT_LLM_CONFIG else None,
         )
         
         if sql.startswith("ERROR:"):
@@ -304,7 +313,7 @@ async def natural_language_query(request: Request, payload: QueryRequest) -> dic
             return {"success": False, "error": "The query cannot be answered with the available data"}
         
         # Validate SQL safety
-        is_safe, error = validate_sql(sql)
+        is_safe, error = validate_sql(sql, allowed_tables={table_name})
         if not is_safe:
             logger.warning(f"SQL validation failed: {error}")
             return {"success": False, "error": error}
@@ -316,7 +325,7 @@ async def natural_language_query(request: Request, payload: QueryRequest) -> dic
         
         # Execute if requested
         if execute:
-            result = execute_query(sql, table_name)
+            result = execute_query(sql, table_name, limit=payload.limit, offset=payload.offset)
             if "error" in result:
                 logger.error(f"Execution error: {result['error']}")
                 save_query_history(nl_query, sql, table_name, executed=False, error=result["error"])
@@ -349,13 +358,16 @@ async def natural_language_query(request: Request, payload: QueryRequest) -> dic
 @app.get("/history")
 async def get_history(table_name: Optional[str] = None, limit: int = 50):
     """Get query history."""
+    safe_limit = max(1, min(limit, MAX_HISTORY_LIMIT))
     db = SessionLocal()
     query = db.query(QueryHistory)
     
     if table_name:
+        if not is_valid_identifier(table_name):
+            raise HTTPException(status_code=400, detail={"code": "INVALID_TABLE", "message": "Invalid table name"})
         query = query.filter(QueryHistory.table_name == table_name)
     
-    records = query.order_by(QueryHistory.created_at.desc()).limit(limit).all()
+    records = query.order_by(QueryHistory.created_at.desc()).limit(safe_limit).all()
     
     history = [
         {
@@ -371,7 +383,7 @@ async def get_history(table_name: Optional[str] = None, limit: int = 50):
     ]
     
     db.close()
-    return {"history": history}
+    return {"history": history, "limit": safe_limit}
 
 
 @app.get("/health/full")
